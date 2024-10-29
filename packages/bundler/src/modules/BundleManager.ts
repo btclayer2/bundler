@@ -83,8 +83,8 @@ export class BundleManager {
         type: 2,
         nonce: await this.signer.getTransactionCount(),
         gasLimit: 10e6,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? 0,
-        maxFeePerGas: feeData.maxFeePerGas ?? 0
+        maxPriorityFeePerGas: feeData.gasPrice ?? 0,
+        maxFeePerGas: feeData.gasPrice ?? 0
       })
       tx.chainId = this.provider._network.chainId
       const signedTx = await this.signer.signTransaction(tx)

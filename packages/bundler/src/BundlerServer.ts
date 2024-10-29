@@ -12,6 +12,7 @@ import { UserOpMethodHandler } from './UserOpMethodHandler'
 import { Server } from 'http'
 import { EntryPoint__factory, UserOperationStruct } from '@account-abstraction/contracts'
 import { DebugMethodHandler } from './DebugMethodHandler'
+import { decodeContractError } from './utils/decodeContractError'
 
 import Debug from 'debug'
 
@@ -71,9 +72,19 @@ export class BundlerServer {
       signature: '0x'
     }
     // await EntryPoint__factory.connect(this.config.entryPoint,this.provider).callStatic.addStake(0)
-    const err = await EntryPoint__factory.connect(this.config.entryPoint, this.provider).callStatic.simulateValidation(emptyUserOp)
-      .catch(e => e)
-    if (err?.errorName !== 'FailedOp') {
+    const entryPoint = await EntryPoint__factory.connect(this.config.entryPoint, this.provider)
+
+    let errorResult
+    try {
+      await entryPoint.callStatic.simulateValidation(emptyUserOp)
+      // simulateValidation must always revert.
+      // if we get here, there's something wrong with the validation
+      throw new Error('simulateValidation should have reverted')
+    } catch (e) {
+      errorResult = decodeContractError(entryPoint.interface, e)
+    }
+
+    if (errorResult?.name !== 'FailedOp') {
       this.fatal(`Invalid entryPoint contract at ${this.config.entryPoint}. wrong version?`)
     }
     const signerAddress = await this.wallet.getAddress()

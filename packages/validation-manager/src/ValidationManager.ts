@@ -22,6 +22,7 @@ import { calcPreVerificationGas } from '@account-abstraction/sdk'
 import { tracerResultParser } from './TracerResultParser'
 import { BundlerTracerResult, bundlerCollectorTracer, ExitInfo } from './BundlerCollectorTracer'
 import { debug_traceCall } from './GethTracer'
+import { decodeContractError } from './decodeContractError'
 
 const debug = Debug('aa.mgr.validate')
 
@@ -62,8 +63,18 @@ export class ValidationManager {
 
   // standard eth_call to simulateValidation
   async _callSimulateValidation (userOp: UserOperation): Promise<ValidationResult> {
-    const errorResult = await this.entryPoint.callStatic.simulateValidation(userOp, { gasLimit: 10e6 }).catch(e => e)
-    return this._parseErrorResult(userOp, errorResult)
+    try {
+      await this.entryPoint.callStatic.simulateValidation(userOp, { gasLimit: 10e6 })
+      // simulateValidation must always revert.
+      // if we get here, there's something wrong with the validation
+      throw new Error('simulateValidation should have reverted')
+    } catch (e) {
+      const errorResult = decodeContractError(this.entryPoint.interface, e)
+      return this._parseErrorResult(userOp, {
+        errorName: errorResult.name,
+        errorArgs: errorResult.args
+      })
+    }
   }
 
   _parseErrorResult (userOp: UserOperation, errorResult: { errorName: string, errorArgs: any }): ValidationResult {

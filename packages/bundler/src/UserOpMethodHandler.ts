@@ -9,6 +9,7 @@ import { UserOperationEventEvent } from '@account-abstraction/contracts/dist/typ
 import { calcPreVerificationGas } from '@account-abstraction/sdk'
 import { ExecutionManager } from './modules/ExecutionManager'
 import { UserOperationByHashResponse, UserOperationReceipt } from './RpcTypes'
+import { decodeContractError } from './utils/decodeContractError'
 
 const HEX_REGEX = /^0x[a-fA-F\d]*$/i
 
@@ -108,16 +109,25 @@ export class UserOpMethodHandler {
     // todo: checks the existence of parameters, but since we hexlify the inputs, it fails to validate
     await this._validateParameters(deepHexlify(userOp), entryPointInput)
     // todo: validation manager duplicate?
-    const errorResult = await this.entryPoint.callStatic.simulateValidation(userOp).catch(e => e)
-    if (errorResult.errorName === 'FailedOp') {
-      throw new RpcError(errorResult.errorArgs.at(-1), ValidationErrors.SimulateValidation)
-    }
-    // todo throw valid rpc error
-    if (errorResult.errorName !== 'ValidationResult') {
-      throw errorResult
+    let errorResult
+    try {
+      await this.entryPoint.callStatic.simulateValidation(userOp)
+      // simulateValidation must always revert.
+      // if we get here, there's something wrong with the validation
+      throw new Error('simulateValidation should have reverted')
+    } catch (e) {
+      errorResult = decodeContractError(this.entryPoint.interface, e)
     }
 
-    const { returnInfo } = errorResult.errorArgs
+    if (errorResult.name === 'FailedOp') {
+      throw new RpcError(errorResult.args.at(-1), ValidationErrors.SimulateValidation)
+    }
+    // todo throw valid rpc error
+    if (errorResult.name !== 'ValidationResult') {
+      throw new Error(errorResult.args.at(-1))
+    }
+
+    const { returnInfo } = errorResult.args
     let {
       preOpGas,
       validAfter,
