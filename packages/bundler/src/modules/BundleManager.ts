@@ -7,7 +7,7 @@ import Debug from 'debug'
 import { ReputationManager, ReputationStatus } from './ReputationManager'
 import { Mutex } from 'async-mutex'
 // import { GetUserOpHashes__factory } from '../types'
-import { UserOperation, StorageMap, getAddr, mergeStorageMap, runContractScript } from '@account-abstraction/utils'
+import { UserOperation, StorageMap, getAddr, mergeStorageMap } from '@account-abstraction/utils'
 import { EventsManager } from './EventsManager'
 import { ErrorDescription } from '@ethersproject/abi/lib/interface'
 import { defaultAbiCoder } from '@ethersproject/abi'
@@ -300,35 +300,35 @@ export class BundleManager {
 
     return userOps.map(userOp => {
       const encoded = defaultAbiCoder.encode(
-          [
-            'address',   // sender
-            'uint256',   // nonce
-            'bytes32',   // initCode hash
-            'bytes32',   // callData hash
-            'uint256',   // callGasLimit
-            'uint256',   // verificationGasLimit
-            'uint256',   // preVerificationGas
-            'uint256',   // maxFeePerGas
-            'uint256',   // maxPriorityFeePerGas
-            'bytes32'    // paymasterAndData hash
-          ],
-          [
-            userOp.sender,
-            userOp.nonce,
-            keccak256(userOp.initCode),
-            keccak256(userOp.callData),
-            userOp.callGasLimit,
-            userOp.verificationGasLimit,
-            userOp.preVerificationGas,
-            userOp.maxFeePerGas,
-            userOp.maxPriorityFeePerGas,
-            keccak256(userOp.paymasterAndData)
-          ]
+        [
+          'address', // sender
+          'uint256', // nonce
+          'bytes32', // initCode hash
+          'bytes32', // callData hash
+          'uint256', // callGasLimit
+          'uint256', // verificationGasLimit
+          'uint256', // preVerificationGas
+          'uint256', // maxFeePerGas
+          'uint256', // maxPriorityFeePerGas
+          'bytes32' // paymasterAndData hash
+        ],
+        [
+          userOp.sender,
+          userOp.nonce,
+          keccak256(userOp.initCode),
+          keccak256(userOp.callData),
+          userOp.callGasLimit,
+          userOp.verificationGasLimit,
+          userOp.preVerificationGas,
+          userOp.maxFeePerGas,
+          userOp.maxPriorityFeePerGas,
+          keccak256(userOp.paymasterAndData)
+        ]
       )
 
       const enc = defaultAbiCoder.encode(
-          ['bytes32', 'address', 'uint256'],
-          [keccak256(encoded), this.entryPoint.address, chainId]
+        ['bytes32', 'address', 'uint256'],
+        [keccak256(encoded), this.entryPoint.address, chainId]
       )
 
       return keccak256(enc)
