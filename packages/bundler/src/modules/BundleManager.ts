@@ -6,10 +6,12 @@ import { JsonRpcProvider, JsonRpcSigner } from '@ethersproject/providers'
 import Debug from 'debug'
 import { ReputationManager, ReputationStatus } from './ReputationManager'
 import { Mutex } from 'async-mutex'
-import { GetUserOpHashes__factory } from '../types'
+// import { GetUserOpHashes__factory } from '../types'
 import { UserOperation, StorageMap, getAddr, mergeStorageMap, runContractScript } from '@account-abstraction/utils'
 import { EventsManager } from './EventsManager'
 import { ErrorDescription } from '@ethersproject/abi/lib/interface'
+import { defaultAbiCoder } from '@ethersproject/abi'
+import { keccak256 } from '@ethersproject/keccak256'
 
 const debug = Debug('aa.exec.cron')
 
@@ -24,6 +26,9 @@ export class BundleManager {
   provider: JsonRpcProvider
   signer: JsonRpcSigner
   mutex = new Mutex()
+
+  private readonly pendingTxs: Map<string, number> = new Map()
+  private readonly maxBlocks: number = 100
 
   constructor (
     readonly entryPoint: EntryPoint,
@@ -60,6 +65,7 @@ export class BundleManager {
         debug('sendNextBundle - no bundle to send')
       } else {
         const beneficiary = await this._selectBeneficiary()
+        debug('sendNextBundle - before sendBundle')
         const ret = await this.sendBundle(bundle, beneficiary, storageMap)
         debug(`sendNextBundle exit - after sent a bundle of ${bundle.length} `)
         return ret
@@ -77,6 +83,14 @@ export class BundleManager {
    * @return SendBundleReturn the transaction and UserOp hashes on successful transaction, or null on failed transaction
    */
   async sendBundle (userOps: UserOperation[], beneficiary: string, storageMap: StorageMap): Promise<SendBundleReturn | undefined> {
+    const userOpHashes = await this.getUserOpHashes(userOps)
+    debug('sendBundle: ', userOpHashes)
+
+    if (userOpHashes.some(hash => this.pendingTxs.has(hash))) {
+      debug('Some UserOps are already being processed')
+      return
+    }
+
     try {
       const feeData = await this.provider.getFeeData()
       const tx = await this.entryPoint.populateTransaction.handleOps(userOps, beneficiary, {
@@ -96,26 +110,33 @@ export class BundleManager {
         ])
         debug('eth_sendRawTransactionConditional ret=', ret)
       } else {
-        // ret = await this.signer.sendTransaction(tx)
+        debug('eth_sendRawTransaction')
         ret = await this.provider.send('eth_sendRawTransaction', [signedTx])
         debug('eth_sendRawTransaction ret=', ret)
       }
-      // TODO: parse ret, and revert if needed.
-      debug('ret=', ret)
-      debug('sent handleOps with', userOps.length, 'ops. removing from mempool')
-      // hashes are needed for debug rpc only.
-      const hashes = await this.getUserOpHashes(userOps)
+
+      const currentBlock = await this.provider.getBlockNumber()
+
+      for (const [hash, block] of this.pendingTxs.entries()) {
+        // Clean up UserOps that have lived more than maxBlocks blocks in the mempool
+        if (currentBlock - block > this.maxBlocks) {
+          this.pendingTxs.delete(hash)
+          debug('Clean up: ', hash)
+        }
+      }
+      userOpHashes.forEach(hash => this.pendingTxs.set(hash, currentBlock))
+
       return {
         transactionHash: ret,
-        userOpHashes: hashes
+        userOpHashes
       }
     } catch (e: any) {
       let parsedError: ErrorDescription
       try {
         parsedError = this.entryPoint.interface.parseError((e.data?.data ?? e.data))
-      } catch (e1) {
+      } catch {
         this.checkFatal(e)
-        console.warn('Failed handleOps, but non-FailedOp error', e)
+        console.warn('Failed handleOps, but non-FailedOp error. userOpHashes=', userOpHashes)
         return
       }
       const {
@@ -266,10 +287,51 @@ export class BundleManager {
 
   // helper function to get hashes of all UserOps
   async getUserOpHashes (userOps: UserOperation[]): Promise<string[]> {
-    const { userOpHashes } = await runContractScript(this.entryPoint.provider,
-      new GetUserOpHashes__factory(),
-      [this.entryPoint.address, userOps])
+    // Since bevm eth_call handles revert data differently,
+    // UserOpHash is no longer calculated through eth_call here.
+    /*
+      const { userOpHashes } = await runContractScript(this.entryPoint.provider,
+          new GetUserOpHashes__factory(),
+          [this.entryPoint.address, userOps])
 
-    return userOpHashes
+      return userOpHashes
+    */
+    const chainId = await this.provider.getNetwork().then(net => net.chainId)
+
+    return userOps.map(userOp => {
+      const encoded = defaultAbiCoder.encode(
+          [
+            'address',   // sender
+            'uint256',   // nonce
+            'bytes32',   // initCode hash
+            'bytes32',   // callData hash
+            'uint256',   // callGasLimit
+            'uint256',   // verificationGasLimit
+            'uint256',   // preVerificationGas
+            'uint256',   // maxFeePerGas
+            'uint256',   // maxPriorityFeePerGas
+            'bytes32'    // paymasterAndData hash
+          ],
+          [
+            userOp.sender,
+            userOp.nonce,
+            keccak256(userOp.initCode),
+            keccak256(userOp.callData),
+            userOp.callGasLimit,
+            userOp.verificationGasLimit,
+            userOp.preVerificationGas,
+            userOp.maxFeePerGas,
+            userOp.maxPriorityFeePerGas,
+            keccak256(userOp.paymasterAndData)
+          ]
+      )
+
+      const enc = defaultAbiCoder.encode(
+          ['bytes32', 'address', 'uint256'],
+          [keccak256(encoded), this.entryPoint.address, chainId]
+      )
+
+      return keccak256(enc)
+    })
   }
 }
