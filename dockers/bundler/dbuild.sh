@@ -5,9 +5,9 @@ cd `cd \`dirname $0\`;pwd`
 test -z $NOBUILD && yarn preprocess
 
 test -z "$VERSION" && VERSION=`jq -r .version ../../packages/bundler/package.json`
-echo version=$VERSION
+echo version=${VERSION}-arm64
 
-IMAGE=accountabstraction/bundler
+IMAGE=btclayer2/bundler
 
 #build docker image of bundler
 #rebuild if there is a newer src file:
@@ -16,8 +16,16 @@ find ./dbuild.sh ../../packages/*/src/ -type f -newer dist/bundler.js 2>&1 | hea
 	npx webpack
 }
 
-docker build -t $IMAGE .
-docker tag $IMAGE $IMAGE:$VERSION
-echo "== To publish"
-echo "   docker push $IMAGE:latest; docker push $IMAGE:$VERSION"
+docker buildx build \
+  --platform linux/arm64 \
+  --push \
+  -t $IMAGE:latest-arm64 \
+  -t $IMAGE:${VERSION}-arm64 \
+  . || {
+    echo "Failed to build/push image"
+    exit 1
+  }
 
+echo "== Images have been built and pushed:"
+echo "   $IMAGE:latest-arm64"
+echo "   $IMAGE:${VERSION}-arm64"

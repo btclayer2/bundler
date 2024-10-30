@@ -1,4 +1,4 @@
-FROM node:16-buster-slim
+FROM --platform=linux/arm64 node:16-buster-slim
 WORKDIR /app/
 COPY dist/bundler.js /app/
 COPY bundler.sh /app/
